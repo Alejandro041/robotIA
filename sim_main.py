@@ -1,5 +1,6 @@
 import os, math, numpy as np, pandas as pd, matplotlib.pyplot as plt
 from datetime import datetime
+from pathlib import Path
 from config import (
     GRID_W, GRID_H, OBSTACLE_DENSITY, WORLD_GEN_RETRIES, START, GOAL,
     DT, MAX_STEPS, DYNAMIC_OBS_STEP, REPLAN_BLOCK_MARGIN,
@@ -12,8 +13,20 @@ from controller import nearest_path_index, unicycle_step, compute_controls
 from maintenance import MaintenanceMonitor
 from ai_agent import decide_action
 
-np.random.seed(7)
 os.makedirs("outputs", exist_ok=True)
+seed_run = int.from_bytes(os.urandom(4), "little")
+np.random.seed(seed_run)
+run_tag = datetime.now().strftime("%Y%m%d-%H%M%S")
+
+def tagged_path(path_str):
+    p = Path(path_str)
+    return p.with_name(f"{p.stem}_{run_tag}{p.suffix}")
+
+CSV_OUT = tagged_path(CSV_LOG)
+PLOT_TRAJ_OUT = tagged_path(PLOT_TRAJ)
+PLOT_CURRENT_OUT = tagged_path(PLOT_CURRENT)
+PLOT_CMDS_OUT = tagged_path(PLOT_CMDS)
+PLOT_LIDAR_OUT = tagged_path(PLOT_LIDAR)
 
 # 1) Mundo y ruta inicial
 world = None
@@ -145,7 +158,7 @@ for step in range(MAX_STEPS):
 
 # Guardar CSV
 Df = pd.DataFrame(log)
-Df.to_csv(CSV_LOG, index=False)
+Df.to_csv(CSV_OUT, index=False)
 
 # Graficar y guardar PNGs (sin estilos ni colores específicos)
 plt.figure(figsize=(6,4))
@@ -155,7 +168,7 @@ plt.xlabel("x")
 plt.ylabel("y")
 plt.gca().set_aspect("equal", adjustable="box")
 plt.tight_layout()
-plt.savefig(PLOT_TRAJ, dpi=160)
+plt.savefig(PLOT_TRAJ_OUT, dpi=160)
 plt.close()
 
 plt.figure(figsize=(8,4))
@@ -168,7 +181,7 @@ plt.xlabel("Paso")
 plt.ylabel("A")
 plt.legend()
 plt.tight_layout()
-plt.savefig(PLOT_CURRENT, dpi=160)
+plt.savefig(PLOT_CURRENT_OUT, dpi=160)
 plt.close()
 
 plt.figure(figsize=(8,4))
@@ -179,7 +192,7 @@ plt.xlabel("Paso")
 plt.ylabel("Magnitud")
 plt.legend()
 plt.tight_layout()
-plt.savefig(PLOT_CMDS, dpi=160)
+plt.savefig(PLOT_CMDS_OUT, dpi=160)
 plt.close()
 
 plt.figure(figsize=(8,4))
@@ -188,7 +201,7 @@ plt.title("Distancia mínima LiDAR")
 plt.xlabel("Paso")
 plt.ylabel("celdas")
 plt.tight_layout()
-plt.savefig(PLOT_LIDAR, dpi=160)
+plt.savefig(PLOT_LIDAR_OUT, dpi=160)
 plt.close()
 
 print("=== Sesión 2 — Prototipo Simulado ===")
@@ -196,5 +209,6 @@ print("Fecha:", datetime.now().isoformat(timespec='seconds'))
 print("Pasos simulados:", len(Df))
 print("Replanificaciones:", replans)
 print("Intentos de mundo:", world_attempts)
-print("CSV:", CSV_LOG)
-print("PNG:", PLOT_TRAJ, PLOT_CURRENT, PLOT_CMDS, PLOT_LIDAR)
+print("Seed usado:", seed_run)
+print("CSV:", CSV_OUT)
+print("PNG:", PLOT_TRAJ_OUT, PLOT_CURRENT_OUT, PLOT_CMDS_OUT, PLOT_LIDAR_OUT)
