@@ -7,9 +7,9 @@ from config import (
     CSV_LOG, PLOT_TRAJ, PLOT_CURRENT, PLOT_CMDS, PLOT_LIDAR
 )
 from world import make_world, inject_dynamic_obstacle
-from planner import a_star, path_to_continuous
+from planner import a_star, path_to_continuous, smooth_path_cells
 from lidar import lidar_scan
-from controller import nearest_path_index, unicycle_step, compute_controls
+from controller import nearest_path_index, compute_controls, guarded_step
 from maintenance import MaintenanceMonitor
 from ai_agent import decide_action
 
@@ -43,6 +43,7 @@ if path is None:
         f"No se encontró ruta inicial después de {WORLD_GEN_RETRIES} intentos. "
         "Reduce OBSTACLE_DENSITY o cambia START/GOAL."
     )
+path = smooth_path_cells(world, path)
 path_xy = path_to_continuous(path)
 
 # 2) Estado del robot
@@ -79,7 +80,11 @@ for step in range(MAX_STEPS):
             int(path_xy[min(len(path_xy)-1, path_idx+5)][0]),
             int(path_xy[min(len(path_xy)-1, path_idx+5)][1])
         )
-        inject_dynamic_obstacle(world, tgt, radius=2)
+        test_world = world.copy()
+        inject_dynamic_obstacle(test_world, tgt, radius=2)
+        cur_cell = (int(robot[0]), int(robot[1]))
+        if a_star(test_world, cur_cell, GOAL) is not None:
+            world = test_world
 
     # Lidar y replanificación si bloqueado
     angs, dists = lidar_scan(world, robot)
@@ -89,6 +94,7 @@ for step in range(MAX_STEPS):
         cur_cell = (int(robot[0]), int(robot[1]))
         new_path = a_star(world, cur_cell, GOAL)
         if new_path is not None:
+            new_path = smooth_path_cells(world, new_path)
             path_xy = path_to_continuous(new_path)
             path_idx = 0
 
@@ -99,7 +105,8 @@ for step in range(MAX_STEPS):
     base_v, base_w = v_cmd, w_cmd
     min_d = float(dists.min())
     if min_d < 1.2:
-        v_cmd *= max(0.0, (min_d - 0.2))
+        slowdown = max(0.2, (min_d - 0.2))
+        v_cmd *= slowdown
 
     context = {
         "step": step,
@@ -118,13 +125,15 @@ for step in range(MAX_STEPS):
         cur_cell = (int(robot[0]), int(robot[1]))
         new_path = a_star(world, cur_cell, GOAL)
         if new_path is not None:
+            new_path = smooth_path_cells(world, new_path)
             path_xy = path_to_continuous(new_path)
             path_idx = nearest_path_index((robot[0], robot[1]), path_xy, 0)
             path_len_left = max(0, len(path_xy) - path_idx)
             v_cmd, w_cmd = compute_controls(robot, path_xy, path_idx)
             base_v, base_w = v_cmd, w_cmd
             if min_d < 1.2:
-                v_cmd *= max(0.0, (min_d - 0.2))
+                slowdown = max(0.2, (min_d - 0.2))
+                v_cmd *= slowdown
 
     if ai_action == "reducir_velocidad":
         v_cmd *= 0.3
@@ -132,7 +141,20 @@ for step in range(MAX_STEPS):
         v_cmd = 0.0
         w_cmd = 0.0
 
-    robot = list(unicycle_step(*robot, v_cmd, w_cmd))
+    next_state, collided = guarded_step(world, robot, v_cmd, w_cmd)
+    if collided:
+        v_cmd = 0.0
+        w_cmd = 0.0
+        blocked_flag = True
+        replans += 1
+        cur_cell = (int(robot[0]), int(robot[1]))
+        new_path = a_star(world, cur_cell, GOAL)
+        if new_path is not None:
+            new_path = smooth_path_cells(world, new_path)
+            path_xy = path_to_continuous(new_path)
+            path_idx = nearest_path_index((robot[0], robot[1]), path_xy, 0)
+            path_len_left = max(0, len(path_xy) - path_idx)
+    robot = list(next_state)
 
     # Logs
     cur = mon.motor_current_model(v_cmd, w_cmd)

@@ -18,9 +18,9 @@ from config import (
     REPLAN_BLOCK_MARGIN,
 )
 from world import make_world, inject_dynamic_obstacle
-from planner import a_star, path_to_continuous
+from planner import a_star, path_to_continuous, smooth_path_cells
 from lidar import lidar_scan
-from controller import nearest_path_index, unicycle_step, compute_controls
+from controller import nearest_path_index, compute_controls, guarded_step
 from maintenance import MaintenanceMonitor
 from ai_agent import decide_action
 
@@ -86,6 +86,7 @@ class MiniGame:
             if path is not None:
                 self.world_attempts = attempt
                 self.world = world
+                path = smooth_path_cells(self.world, path)
                 self.path_xy = path_to_continuous(path)
                 return
         raise RuntimeError(
@@ -178,6 +179,7 @@ class MiniGame:
         if new_path is None:
             return False
         self.replans += 1
+        new_path = smooth_path_cells(self.world, new_path)
         self.path_xy = path_to_continuous(new_path)
         self.path_idx = 0
         path_x = [p[0] for p in self.path_xy]
@@ -198,8 +200,12 @@ class MiniGame:
                 int(self.path_xy[min(len(self.path_xy) - 1, self.path_idx + 5)][0]),
                 int(self.path_xy[min(len(self.path_xy) - 1, self.path_idx + 5)][1]),
             )
-            inject_dynamic_obstacle(self.world, tgt, radius=2)
-            self.world_img.set_data(self.world.T)
+            test_world = self.world.copy()
+            inject_dynamic_obstacle(test_world, tgt, radius=2)
+            cur_cell = (int(self.robot[0]), int(self.robot[1]))
+            if a_star(test_world, cur_cell, GOAL) is not None:
+                self.world = test_world
+                self.world_img.set_data(self.world.T)
 
     def _update_plot(self):
         self.robot_dot.set_data([self.robot[0]], [self.robot[1]])
@@ -258,7 +264,8 @@ class MiniGame:
         base_v, base_w = v_cmd, w_cmd
         min_d = float(dists.min())
         if min_d < 1.2:
-            v_cmd *= max(0.0, (min_d - 0.2))
+            slowdown = max(0.2, (min_d - 0.2))
+            v_cmd *= slowdown
 
         context = {
             "step": self.step,
@@ -282,7 +289,15 @@ class MiniGame:
             v_cmd = 0.0
             w_cmd = 0.0
 
-        self.robot = list(unicycle_step(*self.robot, v_cmd, w_cmd))
+        next_pose, collided = guarded_step(self.world, self.robot, v_cmd, w_cmd)
+        if collided:
+            v_cmd = 0.0
+            w_cmd = 0.0
+            blocked_flag = True
+            if self._replan_from_current("colision"):
+                path_len_left = self._sync_path_index()
+                blocked_flag = False
+        self.robot = list(next_pose)
         cur = self.mon.motor_current_model(v_cmd, w_cmd)
         self.mon.window.append(cur)
 

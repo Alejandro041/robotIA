@@ -37,7 +37,7 @@ def rule_fallback(context):
         return {"accion": "pausa_mantenimiento"}
     if blocked:
         return {"accion": "replanificar"}
-    if lidar_min < 0.8:
+    if lidar_min < 0.5:
         return {"accion": "reducir_velocidad"}
     if path_left < 10:
         return {"accion": "seguir"}
