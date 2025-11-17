@@ -20,7 +20,12 @@ from config import (
 from world import make_world, inject_dynamic_obstacle
 from planner import a_star, path_to_continuous, smooth_path_cells
 from lidar import lidar_scan
-from controller import nearest_path_index, compute_controls, guarded_step
+from controller import (
+    nearest_path_index,
+    compute_controls,
+    guarded_step,
+    segment_hits_obstacle,
+)
 from maintenance import MaintenanceMonitor
 from ai_agent import decide_action
 
@@ -86,11 +91,15 @@ class MiniGame:
             if path is not None:
                 self.world_attempts = attempt
                 self.world = world
-                path = smooth_path_cells(self.world, path)
-                self.path_xy = path_to_continuous(path)
+                smooth_cells = smooth_path_cells(self.world, path)
+                smooth_xy = path_to_continuous(smooth_cells)
+                if self._path_collides(smooth_xy):
+                    self.path_xy = path_to_continuous(path)
+                else:
+                    self.path_xy = smooth_xy
                 return
         raise RuntimeError(
-            f"No se encontró ruta inicial tras {WORLD_GEN_RETRIES} intentos. Ajusta config y vuelve a probar."
+            f"No se encontro ruta inicial tras {WORLD_GEN_RETRIES} intentos. Ajusta config y vuelve a probar."
         )
 
     def _setup_plot(self):
@@ -172,6 +181,14 @@ class MiniGame:
         if self.running:
             self.running = False
             plt.close(self.fig)
+
+    def _path_collides(self, path_xy):
+        if not path_xy or len(path_xy) < 2:
+            return False
+        for i in range(len(path_xy) - 1):
+            if segment_hits_obstacle(self.world, path_xy[i], path_xy[i + 1]):
+                return True
+        return False
 
     def _replan_from_current(self, tag):
         cur_cell = (int(self.robot[0]), int(self.robot[1]))
